@@ -1,0 +1,939 @@
+---
+title: "210830_Aging_paper_code"
+author: "Evan Witt"
+date: "8/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(EnhancedVolcano)
+library(cowplot)
+library(rstatix)
+
+```
+
+
+
+#Alignment of single-cell RNA-seq data with cellranger- update paths with SRA
+```{bash eval = F}
+#!/bin/bash
+
+
+../../cellranger-4.0.0/cellranger mkref --genome=Dmel_genome --fasta=dmel-all-chromosome-r6.32.fa 
+
+../../cellranger-4.0.0/cellranger count --id=Evanlib1_run\
+                   --transcriptome=../Dmel_genome \
+                   --fastqs=Evanlib1 \
+                   --sample=Evanlib1 
+
+../../cellranger-4.0.0/cellranger count --id=Evanlib2_run \
+                   --transcriptome=../Dmel_genome \
+                   --fastqs=Evanlib2 \
+                   --sample=Evanlib2
+
+../../cellranger-4.0.0/cellranger count --id=2018_novogene_run \
+                   --transcriptome=../Dmel_genome \
+                   --fastqs=/ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/C202SC18061959/raw_data \
+                   --sample=Dm_R517 
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r old seurat object}
+#first, we're gonna load the old and young datasets and create an integrated seurat object for old cells
+
+Old1<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/Old1_sc/filtered_feature_bc_matrix")
+Old1 <- CreateSeuratObject(Old1,min.cells=3, min.features =200)
+Old1$rep<-"Old1"
+Old1<-NormalizeData(Old1)
+Old1<-FindVariableFeatures(Old1)
+Old1<-ScaleData(Old1)
+Old1<-SCTransform(Old1)
+Old1<-RunPCA(Old1)
+Old1<-RenameCells(Old1, add.cell.id = "Old1")
+
+
+Old2<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/Old2_sc/filtered_feature_bc_matrix")
+Old2 <- CreateSeuratObject(Old2,min.cells=3, min.features =200)
+Old2$rep<-"Old2"
+Old2<-NormalizeData(Old2)
+Old2<-ScaleData(Old2)
+Old2<-FindVariableFeatures(Old2)
+Old2<-SCTransform(Old2)
+Old2<-RunPCA(Old2)
+Old2<-RenameCells(Old2, add.cell.id = "Old2")
+
+#features <- SelectIntegrationFeatures(object.list = list(Old1, Old2))
+#anchors<-FindIntegrationAnchors(object.list = list(Old1, Old2), anchor.features= features)
+#Old.integrated<-IntegrateData(anchors)
+#Old.integrated<-ScaleData(Old.integrated)
+#Old.integrated<-SCTransform(Old.integrated)
+#Old.integrated<-RunPCA(Old.integrated, assay = "integrated")
+#Old.integrated<-RunUMAP(Old.integrated, assay= "integrated", dims = 1:20)
+#Old.integrated<-RunTSNE(Old.integrated, assay= "integrated", dims = 1:5)
+
+#Old.integrated<-FindNeighbors(Old.integrated, assay = "integrated", n.trees = 100)
+#Old.integrated<-FindClusters(Old.integrated)
+#Old.integrated[["percent.mt"]] <- PercentageFeatureSet(Old.integrated, pattern = "^mt:")
+#DimPlot(Old.integrated, reduction  = "umap", pt.size = 0.5, label = T)
+#DimPlot(Old.integrated, reduction  = "tsne", pt.size = 0.5, label = T)
+
+#DotPlot(Old.integrated,  assay="RNA",features=c("percent.mt","Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+
+
+
+Old.cca<-RunCCA(Old1, Old2)
+Old.cca<-ScaleData(Old.cca)
+Old.cca<-SCTransform(Old.cca)
+Old.cca<-RunUMAP(Old.cca, reduction="cca", dims = 1:14)
+Old.cca<-FindNeighbors(Old.cca, reduction = "cca")
+Old.cca<-FindClusters(Old.cca, resolution = 1.5)
+
+
+
+
+
+Old.cca[["percent.mt"]] <- PercentageFeatureSet(Old.cca, pattern = "^mt:")
+
+#Old.cca<-RunTSNE(Old.cca, reduction="cca", dims = 1:20)
+
+DimPlot(Old.cca, reduction  = "umap", pt.size = 0.5, label = T)
+DimPlot(Old.cca, reduction  = "umap", pt.size = 0.5, label = T, split.by = "rep")
+
+
+
+#DimPlot(Old.cca, reduction  = "tsne", pt.size = 0.5, label = T)
+
+DotPlot(Old.cca,  assay="RNA",features=c("percent.mt","Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+
+
+#remove cluster 22: dying cells
+Old.cca<-subset(Old.cca, subset = seurat_clusters %in% c(0:23,25:27) )
+
+Old.cca<-RunUMAP(Old.cca, reduction="cca", dims = 1:14)
+Old.cca<-FindNeighbors(Old.cca, reduction = "cca", n.trees = 100)
+Old.cca<-FindClusters(Old.cca, algorithm = 2, resolution = 1.5)
+DimPlot(Old.cca, reduction  = "umap", pt.size = 0.5, label = T)
+DotPlot(Old.cca,  assay="RNA",features=c("percent.mt","Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+DotPlot(Old.cca,  assay="SCT",features=c("percent.mt","Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+
+#FeaturePlot(Old.cca, reduction  = "umap", features = "aub" ,pt.size = 0.5, label = T)
+
+#FeaturePlot(Old.cca, reduction  = "umap", features = c("fzo","twe", "soti", "Dpy-30L2") ,pt.size = 0.5, label = T)
+#FeaturePlot(Old.cca, reduction  = "umap", features = c("Fas3","tj","Rab11", "dlg1", "MtnA", "Ilp6") ,pt.size = 0.5, label = T)
+#FeaturePlot(Old.cca, reduction  = "umap", features = c("His2Av", "ProtB") ,pt.size = 0.5, label = T)
+#FeaturePlot(Old.cca, reduction  = "umap", features = c("p-cup", "MtnA") ,pt.size = 0.5, label = T)
+
+DotPlot(Old.cca, assay="RNA",features=c("Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+
+#DotPlot(Old.cca, assay="RNA",features=c("Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"), split.by = "rep")
+
+
+new.idents<-c("Late spermatocytes",#0 -
+              "Early spermatocytes",#1-
+              "Early spermatids",#2-
+              "Cyst cells",#3 -
+              "Cyst cells",#4-
+              "Early spermatocytes",#5
+              "Late spermatocytes",#6-
+              "Late spermatocytes",#7 -
+              "Epithelial cells", #8 -
+              "Late spermatogonia",#9 -
+              "Epithelial cells",#10 -
+              "Cyst cells",#11 -
+              "Early spermatids",#12-
+              "Late spermatocytes",#13 -
+              "Cyst cells",#14 - 
+              "Late spermatocytes",#15-
+              "Early spermatocytes",#16
+              "Early spermatids",#17
+              "Cyst cells",#18
+              "Hub cells",#19 -
+              "Hub cells", #20 - used to be late spermatocytes
+              "Cyst cells",#21-
+              "Cyst cells",#22-
+              "Late spermatocytes", #23 - used to be late spermatids
+              "Late spermatids", #24 -
+              "Late spermatocytes",#25-
+              "Late spermatogonia",#26-
+              "Early spermatocytes",#27 -
+              "GSC, Early spermatogonia" #28 -
+)
+
+names(new.idents)<-c(0:28)
+
+Old.cca <-RenameIdents(Old.cca,new.idents)
+
+#
+
+#DotPlot(Old.cca, assay="RNA",features=c("MtnA", "Fas3","Rab11", "dlg1", "His2Av", "ProtB"), split.by = "rep")
+#DotPlot(Old.cca, assay="SCT",features=c("MtnA", "Fas3","Rab11", "dlg1", "His2Av", "ProtB", "p-cup", "Dpy-30L2", "soti"))
+
+
+DimPlot(Old.cca, reduction  = "umap", pt.size = 0.5, label = T)
+
+Old.cca$new.ident<-Old.cca@active.ident
+Old.cca<-ScaleData(Old.cca)
+
+
+```
+
+
+#set up the young cell seurat object
+```{r young seurat object}
+
+##############reference-based integration
+library(Seurat)
+library(plyr)
+library(ggplot2)
+setwd("~/Dropbox (Dropbox @RU)/Migrated From Box/R517_3reps/")
+
+Rep2018<-Read10X("2018_novogene_run/")
+Rep2018 <- CreateSeuratObject(Rep2018,min.cells=3, min.features =200)
+Lib1<-Read10X("Evanlib1_run/")
+Lib1 <- CreateSeuratObject(Lib1,min.cells=3, min.features =200)
+Lib2<-Read10X("Evanlib2_run/")
+Lib2 <- CreateSeuratObject(Lib2,min.cells=3, min.features =200)
+
+
+Rep2018$rep<-"2018"
+Lib1$rep<-"Rep1"
+Lib2$rep<-"Rep2"
+
+Lib1<-subset(Lib1, nCount_RNA <100000 )
+Rep2018 <- NormalizeData(object = Rep2018)
+Rep2018<- ScaleData(object = Rep2018)
+Rep2018<-FindVariableFeatures(Rep2018)
+#Rep2018<-RunPCA(Rep2018)
+
+Lib1 <- NormalizeData(object = Lib1)
+Lib1<- ScaleData(object = Lib1)
+Lib1<-FindVariableFeatures(Lib1)
+#Lib1<-RunPCA(Lib1)
+
+Lib2 <- NormalizeData(object = Lib2)
+Lib2<- ScaleData(object = Lib2)
+Lib2<-FindVariableFeatures(Lib2)
+#Lib2<-RunPCA(Lib2)
+
+#Rep2018<-SCTransform(Rep2018)
+#Lib1<-SCTransform(Lib1)
+#Lib2<-SCTransform(Lib2)
+
+testis.list<-list(Rep2018, Lib1, Lib2)
+
+testis.features <- SelectIntegrationFeatures(object.list = testis.list, nfeatures = 3000)
+
+
+
+testis.anchors <- FindIntegrationAnchors(object.list = testis.list,# normalization.method = "SCT", 
+                                       anchor.features = testis.features)
+rm(testis.list)
+rm(testis.integrated)
+
+testis.integrated <- IntegrateData(anchorset = testis.anchors)
+
+
+
+testis.integrated<- ScaleData(testis.integrated)
+testis.integrated<-FindVariableFeatures(testis.integrated, assay="RNA")
+testis.integrated <- RunPCA(testis.integrated,verbose = FALSE, assay="integrated")
+
+#testis.integrated<-SCTransform(testis.integrated)
+testis.integrated<- RunUMAP(testis.integrated,dims=c(1:5, 8, 16, 18, 20))
+testis.integrated <- FindNeighbors(testis.integrated)
+testis.integrated <- FindClusters(testis.integrated, resolution=0.5)
+testis.integrated<-RunTSNE(testis.integrated )
+
+p1 <- DimPlot(testis.integrated, reduction = "tsne", split.by ="rep", label=TRUE)+theme(legend.position = "none")
+p2 <- DimPlot(testis.integrated, reduction = "tsne", label = TRUE)
+plot_grid(p1, p2, nrow=2)
+DefaultAssay(testis.integrated)<-"RNA"
+
+FeaturePlot(testis.integrated, reduction ="tsne", features = c("p-cup", "aub", "fzo", "bam", "vas", "MtnA"))
+
+p1 <- DimPlot(testis.integrated, reduction = "umap", split.by ="rep", label=TRUE)+theme(legend.position = "none")
+p2 <- DimPlot(testis.integrated, reduction = "umap", label = TRUE)
+plot_grid(p1, p2, nrow=2)
+FeaturePlot(testis.integrated, reduction ="umap", features = c("p-cup", "aub", "fzo", "bam", "vas", "MtnA"))
+
+
+DefaultAssay(testis.integrated) <- "RNA"
+
+
+p2<-DotPlot(testis.integrated, features = c("MtnA", "Fas3", "dlg1", "Rab11", "His2Av", "aub", "bam", "fzo", "twe", "Dpy-30L2", "p-cup"))
+
+plot_grid(p1, p2, nrow=2)
+new.cluster.ids<-c("Early spermatids",#0
+                   "Late spermatocytes",#1
+                   "Late spermatocytes",#2
+                   "Early spermatids",#3
+                   "Cyst cells",#4
+                   "Early spermatids",#5
+                   "Late spermatocytes",#6
+                   "Early spermatocytes",#7
+                   "Early spermatocytes",#8
+                   "Late spermatocytes",#9
+                   "Late spermatogonia",#10
+                   "GSC, early spermatogonia",#11
+                   "Late spermatids",#12
+                   "Cyst cells",#13
+                   "Epithelial cells",#14
+                   "Late spermatogonia",#15
+                   "Hub cells"#16
+        
+                   
+                   )
+names(new.cluster.ids)<-c(0:16)
+testis.integrated<-RenameIdents(testis.integrated,new.cluster.ids)
+
+
+#that's attempt 1 at clustering.  Let's try again.
+#that's attempt 1 at clustering.  Let's try again.
+DefaultAssay(testis.integrated)<-"integrated"
+testis.integrated <- FindNeighbors(testis.integrated, dims = c(1:5))
+testis.integrated <- FindClusters(testis.integrated,dims = c(1:5), resolution=2)
+testis.integrated<-RunTSNE(testis.integrated, dims=c(1:5))
+
+
+testis.integrated<-RunTSNE(testis.integrated, dims=c(1:5))
+
+p1 <- DimPlot(testis.integrated, reduction = "tsne", label=TRUE)+theme(legend.position = "none")
+#p2 <- DimPlot(testis.integrated, reduction = "tsne", label = TRUE)
+p2<-DotPlot(testis.integrated, features = c("MtnA", "Fas3", "dlg1", "Rab11", "His2Av", "aub", "bam", "fzo", "twe", "Dpy-30L2", "p-cup"))+theme(axis.text.x=element_text(angle=90))
+plot_grid(p1, p2, nrow=2)
+
+#ggsave("200428_dims1_5_res2.pdf")
+
+
+testis.integrated<-SCTransform(testis.integrated, variable.features.n =15525 )
+##check if cluster is contiguous
+
+
+testis.integrated<-SCTransform(testis.integrated)
+DimPlot(testis.integrated, reduction = "tsne", split.by ="ident", label=TRUE)+theme(legend.position = "none")
+#res=2
+new.cluster.ids<-c(
+  "Early spermatids",#0
+  "Early spermatocytes",#1
+  "Late spermatocytes",#2
+  "Late spermatocytes",#3
+  "Late spermatocytes",#4
+  "Late spermatocytes",#5
+  "Early spermatids",#6
+  "Late spermatocytes",#7
+  "Early spermatocytes",#8
+  "Early spermatocytes",#9
+  "Late spermatocytes",#10
+  "Early spermatocytes",#11
+  "Early spermatocytes",#12
+  "Epithelial cells",#13
+  "Early spermatids",#14
+  "Cyst cells",#15
+  "Epithelial cells",#16
+  "Early spermatocytes",#17
+  "Early spermatids",#18
+  "Early spermatids",#19
+  "Early spermatids",#20
+  "Early spermatocytes",#21
+  "Late spermatids",#22
+  "Early spermatocytes",#23
+  "Late spermatocytes",#24
+  "Early spermatocytes",#25
+  "Epithelial cells",#26
+  "Early spermatocytes",#27
+  "Late spermatocytes",#28
+  "Late spermatogonia",#29
+  "Hub cells",#30
+  "Early spermatocytes",#31
+  "Early spermatocytes",#32
+  "Epithelial cells",#33
+  "Cyst cells",#34
+  "Late spermatogonia",#35
+  "GSC, Early spermatogonia",#36
+  "Early spermatocytes"#37
+  
+  
+)
+names(new.cluster.ids)<-c(0:37)
+testis.integrated<-RenameIdents(testis.integrated,new.cluster.ids)
+
+testis.integrated<-SCTransform(testis.integrated )
+testis.integrated<-RunPCA(testis.integrated)
+testis.integrated <- FindNeighbors(testis.integrated, dims = c(1:5))
+testis.integrated <- FindClusters(testis.integrated )
+testis.integrated<-RunUMAP(testis.integrated, dims=c(1:5))
+
+DotPlot(testis.integrated,features=c("Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3", "gish", "nsr"))
+DimPlot(testis.integrated, label = T, split.by ="rep", reduction = "umap")
+DimPlot(testis.integrated, label = T, reduction = "umap")
+FeaturePlot(testis.integrated, reduction  = "umap", features = c("Fas3","tj","Rab11", "dlg1", "MtnA", "Ilp6") ,pt.size = 0.5, label = T)
+FeaturePlot(testis.integrated, reduction  = "umap", features = c("fzo","twe", "soti", "Dpy-30L2") ,pt.size = 0.5, label = T)
+FeaturePlot(testis.integrated, reduction  = "umap",split.by = "rep", features = c("Dpy-30L2") ,pt.size = 0.5, label = T)
+
+
+
+
+
+new.idents<-c( "Early spermatocytes",#0
+               "Late spermatocytes",#1
+               "Early spermatocytes",#2
+               "Early spermatocytes", #3
+               "Late spermatocytes",#4
+               "Hub cells",#5
+               "Early spermatids",  #6 
+               "Late spermatogonia", #7
+               "Late spermatocytes",#8
+               "Cyst cells",#9
+               "Early spermatocytes",#10
+               "Early spermatocytes",#11
+               "Early spermatids",#12
+               "Cyst cells", #13
+               "Early spermatids",#14
+               "Cyst cells",#15
+               "Late spermatogonia",#16
+               "Late spermatocytes", #17
+               "Late spermatogonia",#18
+               "Early spermatocytes",#19
+               "Early spermatocytes",#20
+               "Hub cells",#21
+               "Late spermatids",#22
+               "GSC, Early spermatogonia",#23
+               "Epithelial cells",#24
+               "Early spermatocytes"#25 
+)
+
+names(new.idents)<-0:25
+testis.integrated<-RenameIdents(testis.integrated, new.idents)
+testis.integrated$new.ident<-testis.integrated@active.ident
+
+
+#new- take out rep2018,
+testis.integrated<-subset(testis.integrated,rep %in% c("Rep1","Rep2"))
+testis.integrated<-SCTransform(testis.integrated )
+testis.integrated<-RunPCA(testis.integrated)
+testis.integrated <- FindNeighbors(testis.integrated, dims = c(1:6))
+testis.integrated <- FindClusters(testis.integrated )
+testis.integrated<-RunUMAP(testis.integrated, dims=c(1:6))
+DimPlot(testis.integrated, group.by = "new.ident")
+Idents(testis.integrated)<-"new.ident"
+
+
+
+```
+
+Now let's integrate old.cca and young.cca
+```{r old young integration}
+
+VariableFeatures(Old.cca)<-rownames(Old.cca@assays$SCT)
+Old.cca@active.ident<-factor(x = Old.cca@active.ident, levels=c("Hub cells", "Cyst cells", "Epithelial cells", "GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
+testis.integrated@active.ident<-factor(x = testis.integrated@active.ident, levels=c("Hub cells", "Cyst cells", "Epithelial cells", "GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
+
+#make dotplots for old.cca and young.cca, supplemental figure 2 ######
+p1<-DotPlot(Old.cca,  assay="RNA",features=c("Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3"))+ggtitle("Old flies")+theme(axis.text.x = element_text(face = "italic"))
+p2<-DotPlot(testis.integrated,  assay="RNA",features=c("Dpy-30L2","aub", "bam", "vas","soti","fzo","twe","tj","Rab11", "dlg1","MtnA","His2Av","ProtB", "p-cup", "Fas3"))+ggtitle("Young flies")+theme(axis.text.x = element_text(face = "italic"))
+plot_grid(p1, p2, nrow = 2, labels = c("A","B"))
+
+
+
+
+
+testis.cca<-RunCCA(testis.integrated, Old.cca)
+#saveRDS(testis.cca, "~/Box Sync/R517_3reps/200520_5Reps_Old_Young_CCA_SCT.RDS")
+testis.cca<-SCTransform(testis.cca)
+testis.cca<- ScaleData(testis.cca, verbose = FALSE, assay="SCT", vars.to.regress = c("nCount_RNA","nFeature_RNA"))
+testis.cca<-FindVariableFeatures(testis.cca, assay="SCT")
+testis.cca <- RunPCA(testis.cca,verbose = FALSE, npcs = 20, assay = "SCT")
+testis.cca <- RunUMAP(testis.cca, reduction = "cca", assay = "integrated", dims = 1:4)
+Avgexpsplit <-AverageExpression(testis.cca, group.by = "rep")$RNA
+
+
+#correlation plot between replicates
+Avgexpsplit<-data.frame(Avgexpsplit)
+cormat<-cor(Avgexpsplit)
+rownames(cormat)<-c("Old1","Old2","Young1","Young2")
+colnames(cormat)<-c("Old1","Old2","Young1","Young2")
+library(corrplot)
+corrplot(cormat, method = 'number',tl.col = "black", title = "Pearson's R between replicates",mar=c(0,0,1,0))
+
+
+
+```
+
+
+Now annotate SNPS
+Run this part on a cluster- for the sake of computational resources this part has been calculated for you and this cell will not run automatically. skip to the next part.
+#gDNA coverage
+```{bash eval = FALSE}
+#first, get coverage of every position in the somatic gDNA files from each sample
+samtools depth Old1.bam >Old1_coverage.txt
+samtools depth Old2.bam >Old2_coverage.txt
+samtools depth Young1.bam >Young1_coverage.txt
+samtools depth Young2.bam >Young2_coverage.txt
+gzip Old1_coverage.txt
+gzip Old2_coverage.txt
+gzip Young1_coverage.txt
+gzip Young2_coverage.txt
+```
+
+
+#call variants on single cell and gDNA samples- change path names
+```{bash eval = FALSE}
+
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old1_run/outs/possorted_genome_bam.bam | bcftools call -mv -Ob -o Old1_sc.bcf
+
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old2_run/outs/possorted_genome_bam.bam | bcftools call -mv -Ob -o Old2_sc.bcf
+
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib1_run/outs/possorted_genome_bam.bam | bcftools call -mv -Ob -o Young1_sc.bcf
+
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib1_run/outs/possorted_genome_bam.bam | bcftools call -mv -Ob -o Young2_sc.bcf
+
+
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta Old1.bam  | bcftools call -mv -Ob -o Old1.bcf
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta Old2.bam  | bcftools call -mv -Ob -o Old2.bcf
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta Young1.bam  | bcftools call -mv -Ob -o Young1.bcf
+bcftools mpileup  -Q 25 -f /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta Young2.bam  | bcftools call -mv -Ob -o Young2.bcf
+```
+
+
+#Variant calling- make sure to put all these in the same directory
+```{bash eval = FALSE}
+
+bcftools index Old1_sc.bcf
+bcftools index Old2_sc.bcf
+bcftools index Young1_sc.bcf
+bcftools index Young2_sc.bcf
+bcftools index Old1.bcf
+bcftools index Old2.bcf
+bcftools index Young1.bcf
+bcftools index Young2.bcf
+
+
+bcftools isec Old1.bcf Old1_sc.bcf -p isec
+cp isec/0001.vcf Old1_sc_private.vcf
+
+bcftools isec Old2.bcf Old2_sc.bcf -p isec
+cp isec/0001.vcf Old2_sc_private.vcf
+
+bcftools isec Young1.bcf Young1_sc.bcf -p isec
+cp isec/0001.vcf Young1_sc_private.vcf
+
+bcftools isec Young2.bcf Young2_sc.bcf -p isec
+cp isec/0001.vcf Young2_sc_private.vcf
+
+
+```
+
+
+
+#Match snps to barcodes
+```{bash eval = FALSE}
+#!/bin/bash 
+
+rm Old1_read_names.txt 
+bcftools view -v snps Old1_sc_private.vcf|grep -v "^#" | grep -v Scaffold |grep -v 211000 | grep -v mitochondrion| grep -v rDNA| while read line ; do
+
+position=$(echo $line |awk -v OFS="" '{print $2}')
+chr=$(echo $line |awk -v OFS="" '{print $1}')
+title=$(echo $line |awk -v OFS="" '{print $1,":", $2,"-",$2}')
+alt=$(echo $line |awk -v OFS="" '{print $5}')
+ref=$(echo $line |awk -v OFS="" '{print $4}')
+#echo $position
+#echo $title
+#echo $alt
+
+read=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old1_run/outs/possorted_genome_bam.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v alt="$alt" '{if($3==alt) print $4}')
+
+#echo $read
+for i in `echo $read`
+do
+echo $chr $position $ref $alt $i >>Old1_read_names.txt 
+done
+
+
+read2=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210507_R517_Old_Young_gDNA/usftp21.novogene.com/raw_data/Old1.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v ref="$ref" '{if($3==ref) print $4}')
+#echo $read2
+nread=$(echo $read2 | wc -w  )
+
+echo $chr $position $ref $alt $nread >> Old1_snps_ref_reads.txt
+
+done
+
+rm Old1_read_names_and_barcodes.txt
+
+samtools view /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old1_run/outs/possorted_genome_bam.bam  | fgrep -w -f <(awk '{print $5}' Old1_read_names.txt) | awk '{print $1, $(NF-3)}' >>Old1_read_names_and_barcodes.txt
+
+
+#same for Old2
+
+rm Old2_read_names.txt 
+samtools index /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old2_run/outs/possorted_genome_bam.bam
+
+bcftools view -v snps Old2_sc_private.vcf|grep -v "^#" | grep -v Scaffold |grep -v 211000 | grep -v mitochondrion| grep -v rDNA| while read line ; do
+
+position=$(echo $line |awk -v OFS="" '{print $2}')
+chr=$(echo $line |awk -v OFS="" '{print $1}')
+title=$(echo $line |awk -v OFS="" '{print $1,":", $2,"-",$2}')
+alt=$(echo $line |awk -v OFS="" '{print $5}')
+ref=$(echo $line |awk -v OFS="" '{print $4}')
+#echo $position
+#echo $title
+#echo $alt
+
+read=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old2_run/outs/possorted_genome_bam.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v alt="$alt" '{if($3==alt) print $4}')
+
+#echo $read
+for i in `echo $read`
+do
+echo $chr $position $ref $alt $i >>Old2_read_names.txt 
+done
+
+
+read2=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210507_R517_Old_Young_gDNA/usftp21.novogene.com/raw_data/Old2.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v ref="$ref" '{if($3==ref) print $4}')
+#echo $read2
+nread=$(echo $read2 | wc -w  )
+
+echo $chr $position $ref $alt $nread >> Old2_snps_ref_reads.txt
+done
+
+
+
+rm Old2_read_names_and_barcodes.txt
+
+samtools view /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/Old_Dmel_sc_2reps/usftp21.novogene.com/raw_data/Old2_run/outs/possorted_genome_bam.bam  | fgrep -w -f <(awk '{print $5}' Old2_read_names.txt) | awk '{print $1, $(NF-3)}' >>Old2_read_names_and_barcodes.txt
+
+
+
+
+#now young1 and young2
+
+samtools index /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib1_run/outs/possorted_genome_bam.bam
+
+rm Young1_read_names.txt 
+bcftools view -v snps Young1_sc_private.vcf|grep -v "^#" | grep -v Scaffold |grep -v 211000 | grep -v mitochondrion| grep -v rDNA| while read line ; do
+
+position=$(echo $line |awk -v OFS="" '{print $2}')
+chr=$(echo $line |awk -v OFS="" '{print $1}')
+title=$(echo $line |awk -v OFS="" '{print $1,":", $2,"-",$2}')
+alt=$(echo $line |awk -v OFS="" '{print $5}')
+ref=$(echo $line |awk -v OFS="" '{print $4}')
+#echo $position
+#echo $title
+#echo $alt
+
+read=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib1_run/outs/possorted_genome_bam.bam  $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v alt="$alt" '{if($3==alt) print $4}')
+
+#echo $read
+for i in `echo $read`
+do
+echo $chr $position $ref $alt $i >>Young1_read_names.txt 
+done
+
+
+read2=$(samtools view -b Young1.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v ref="$ref" '{if($3==ref) print $4}')
+#echo $read2
+nread=$(echo $read2 | wc -w  )
+
+echo $chr $position $ref $alt $nread >> Young1_snps_ref_reads.txt
+done
+
+
+
+rm Young1_read_names_and_barcodes.txt
+
+samtools view /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib1_run/outs/possorted_genome_bam.bam | fgrep -w -f <(awk '{print $5}' Young1_read_names.txt) | awk '{print $1, $(NF-3)}' >>Young1_read_names_and_barcodes.txt
+
+
+#same for Young2
+
+samtools index /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib2_run/outs/possorted_genome_bam.bam
+rm Young2_read_names.txt 
+bcftools view -v snps Young2_sc_private.vcf|grep -v "^#" | grep -v Scaffold |grep -v 211000 | grep -v mitochondrion| grep -v rDNA| while read line ; do
+
+position=$(echo $line |awk -v OFS="" '{print $2}')
+chr=$(echo $line |awk -v OFS="" '{print $1}')
+title=$(echo $line |awk -v OFS="" '{print $1,":", $2,"-",$2}')
+alt=$(echo $line |awk -v OFS="" '{print $5}')
+ref=$(echo $line |awk -v OFS="" '{print $4}')
+#echo $position
+#echo $title
+#echo $alt
+
+read=$(samtools view -b /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib2_run/outs/possorted_genome_bam.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v alt="$alt" '{if($3==alt) print $4}')
+
+#echo $read
+for i in `echo $read`
+do
+echo $chr $position $ref $alt $i >>Young2_read_names.txt 
+done
+
+
+read2=$(samtools view -b Young2.bam $title | samtools fillmd -e - /ru-auth/local/home/lzhao/Data_scratch/witt/witt/Genomes/dmel_r6.38_FB2021_01/fasta/dmel-all-chromosome-r6.38.fasta | grep -v "^@"| awk -v pos=$position 'BEGIN {OFS = FS = "\t" } ; {n=split($10,a,"") ; if(a[(pos-$4)+1] != "=" ) print pos,(pos-$4)+1, a[(pos-$4)+1], $1, $4, $10 }'|awk -v ref="$ref" '{if($3==ref) print $4}')
+#echo $read2
+nread=$(echo $read2 | wc -w  )
+
+echo $chr $position $ref $alt $nread >> Young2_snps_ref_reads.txt
+done
+
+
+rm Young2_read_names_and_barcodes.txt
+
+samtools view /ru-auth/local/home/lzhao/Data_scratch/witt/witt/singlecell/210216_testis_3reps/Evanlib2_run/outs/possorted_genome_bam.bam  | fgrep -w -f <(awk '{print $5}' Young2_read_names.txt) | awk '{print $1, $(NF-3)}' >>Young2_read_names_and_barcodes.txt
+
+
+```
+
+
+
+
+
+#match snps to celltypes
+```{r eval=FALSE}
+#!/bin/env Rscript
+
+#run this block as a stand-alone script on a cluster, or just skip to the next part
+library(plyr)
+library(dplyr)
+library(tidyr)
+
+
+#get coverage from coverage files
+
+Old1coverage<-read.table(gzfile("Old1_coverage.txt.gz"), header = F)
+Old2coverage<-read.table(gzfile("Old2_coverage.txt.gz"), header = F)
+Young1coverage<-read.table(gzfile("Young1_coverage.txt.gz"), header = F)
+Young2coverage<-read.table(gzfile("Young2_coverage.txt.gz"), header = F)
+Old1coverage$rep<-"Old1"
+Old2coverage$rep<-"Old2"
+Young1coverage$rep<-"Rep1"
+Young2coverage$rep<-"Rep2"
+coverage<-do.call("rbind", list(Old1coverage,Old2coverage,Young1coverage, Young2coverage))
+head(coverage)
+colnames(coverage)<-c("chr", "pos","coverage", "rep")
+
+
+readnames<-read.table("Old1_read_names.txt")
+colnames(readnames)<-c("chr","pos","ref","alt", "readname")
+barcodes<-read.table("Old1_read_names_and_barcodes.txt")
+colnames(barcodes)<-c("readname", "barcode")
+old1data<-join(readnames, barcodes)
+old1data$rep<-"Old1"
+
+readnames<-read.table("Old2_read_names.txt")
+colnames(readnames)<-c("chr","pos","ref","alt", "readname")
+barcodes<-read.table("Old2_read_names_and_barcodes.txt")
+colnames(barcodes)<-c("readname", "barcode")
+old2data<-join(readnames, barcodes)
+old2data$rep<-"Old2"
+
+readnames<-read.table("Young1_read_names.txt")
+colnames(readnames)<-c("chr","pos","ref","alt", "readname")
+barcodes<-read.table("Young1_read_names_and_barcodes.txt")
+colnames(barcodes)<-c("readname", "barcode")
+young1data<-join(readnames, barcodes)
+young1data$rep<-"Rep1"
+
+readnames<-read.table("Young2_read_names.txt")
+colnames(readnames)<-c("chr","pos","ref","alt", "readname")
+barcodes<-read.table("Young2_read_names_and_barcodes.txt")
+colnames(barcodes)<-c("readname", "barcode")
+young2data<-join(readnames, barcodes)
+young2data$rep<-"Rep2"
+
+data<-do.call("rbind", list(old1data, old2data, young1data, young2data))
+head(data)
+data<-join(data, coverage)
+head(data)
+tail(data)
+write.csv(data, "210607_SNPS_readnames_barcodes_coverage.csv")
+
+library(plyr)
+library(dplyr)
+library(tidyr)
+
+data<-read.csv("210607_SNPS_readnames_barcodes_coverage.csv")
+#merge with seurat:
+library(Seurat)
+
+data$barcode2<-stringr::str_split(data$barcode, pattern = "CB:Z:", simplify=T)[,2]
+data$barcode2<-stringr::str_split(data$barcode2, pattern = "-", simplify=T)[,1]
+#data$barcode2<-gsub(x= data$barcode2, pattern ="Old2_",replacement= "")
+testis.cca@meta.data$barcode2<-stringr::str_split(rownames(testis.cca@meta.data), pattern="-", simplify=T)[,1]
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old2_Old2_",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old2_",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old1_",replacement= "")
+
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_2",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_3",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_1",replacement= "")
+data2<-plyr::join(data, testis.cca@meta.data, by=c("rep", "barcode2"))
+head(data2)
+tail(data2)
+data2<-subset(data2, !new.ident =="NA") #this is fixed now
+data2<-subset(data2, coverage > 10) 
+head(data2)
+tail(data2)
+
+
+somatic <-subset(data2, new.ident %in% c("Cyst cells", "Cyst stem cells", "Hub cells", "Epithelial cells"))
+somatic <-unique(somatic[,c("pos","chr", "barcode","rep")])$pos %>%table() %>%data.frame() %>%subset(Freq > 0)
+
+data2<-subset(data2, !pos %in% somatic[,1])
+#remove SNPS present in >20 somatic cells
+
+
+#keep SNPS present in only one rep
+data2$mutation<-paste(data2$ref, data2$alt)
+head(data2)
+data5<-data2 %>% mutate (merged = paste(chr, pos,ref,alt)) 
+head(data5)
+data5<-unique(data5[,c("merged","rep")])[,c("merged")] %>%table() %>%data.frame() %>%subset(Freq ==1)
+head(data5)
+#library(stringr)
+data5<-stringr::str_split(data5$., pattern=" ", simplify=T)%>%data.frame()
+head(data5)
+colnames(data5)<-c("chr", "pos","ref","alt")
+data5<-join(data5, data2)
+head(data5)
+
+
+unique(data5[,c("chr", "pos", "ref", "alt","mutation","age")])[,c("age","mutation")] %>%table() %>%data.frame()
+#this gets the proportions used for the next part
+unique(data5[,c("chr", "pos", "ref", "alt","mutation","age")])[,c("age","mutation")] %>%table() %>%data.frame() %>% group_by(age) %>%summarise(sum=sum(Freq))
+
+
+#remove clustered mutations:
+data3<-unique(data5[,c("chr","pos", "ref", "alt")])
+ans<-data3[1,]$pos
+Idents(testis.cca)<-c("age")
+tmp<-data.frame()
+
+
+#for every cluster, keep only the first SNP
+tmp2<-subset(tmp, cluster =="none")
+data5<-join(tmp, data5)
+
+
+#require more than one read:
+ data5<-data5 %>% group_by(chr,pos, ref, alt,  rep) %>% mutate (nMutReads= n_distinct(readname))
+data5<-subset(data5, nMutReads > 1)
+
+
+tmp1<- unique(data5[,c("age","barcode2","new.ident")])[,c("age","new.ident")] %>%table() %>% data.frame()
+
+tmp2<-testis.cca@meta.data %>% group_by(age, new.ident) %>% summarise(n=n()) %>%data.frame()
+tmp3<-join(tmp1, tmp2)
+tmp3$prop<-tmp3$Freq/tmp3$n
+tmp3
+tmp3
+
+write.csv(data5, "210603_R517_Old_Young_SNP_database.csv", col.names = T)
+
+```
+
+#now make figure 2
+```{r figure 2}
+
+props<-data.frame(age = c("Old","Young","Old","Young","Old","Young","Old","Young","Old","Young","Old","Young"),
+                  new.ident = c("Early spermatids", "Early spermatids","Early spermatocytes","Early spermatocytes",
+                  "GSC, Early spermatogonia", "GSC, Early spermatogonia","Late spermatids","Late spermatids",
+                  "Late spermatocytes","Late spermatocytes","Late spermatogonia","Late spermatogonia"),
+                  Freq = c(535,234,374,418,24,61,75,17,1036,89,180,189), n = c(1637,1391,2096,7215,47,125,187,222,3651,1078,585,809))
+
+props$prop<-props$Freq/props$n
+
+tmp<-data.frame()
+for (i in 1:nrow(props)){
+tmp2<-prop.test(x= props[i,c("Freq")], n = props[i,c("n")])$conf.int[1:2]
+tmp<-rbind(tmp, tmp2)
+  }
+names(tmp)<-c("Low","High")
+props<-cbind(props, tmp)
+
+
+props$new.ident<-factor(props$new.ident, levels = c("GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
+
+
+tmp<-data.frame()
+for (i in c(1,3,5,7,9,11)){
+  tmp2<-prop.test(x= props[c(i,i+1),c("Freq")], n = props[c(i,i+1),c("n")])$p.value
+  tmp<-rbind(tmp, tmp2)
+}
+
+
+names(tmp)<-c("p")
+tmp$new.ident<-unique(props$new.ident)
+#p values for between comparisons
+tmp$p.adj<-p.adjust(as.matrix(tmp$p))
+
+
+props$age<-factor(props$age, levels = c("Young","Old"))
+
+
+ggplot(props, aes( x = new.ident, y = prop))+geom_bar(position = "dodge",stat = "identity", aes(fill  = age, col = age))+
+  theme_classic()+theme(axis.text=element_text(size=10) )+
+  geom_errorbar(width=0.3, position= position_dodge(width=0.9),col= "black",size=0.5,aes(ymin=Low, ymax=High, group=age))+
+  ylab("Proportion cells with mutations")+xlab("")+theme(axis.text =element_text(size=10), axis.title=element_text(size=10))+
+  geom_text(data = tmp,col="black",y=Inf, vjust = 1.5,aes(label = formatC(p, digits  = 2, format = "e")))+labs(fill = "Fly age", col = "Fly age")+scale_fill_manual(values=c("royalblue","darkorchid4"))+scale_color_manual(values=c("royalblue","darkorchid4"))
+
+
+#figure 2
+
+ggsave("210830_Figure2_mutload.pdf", width= 11.5, height=5)
+
+
+```
+
+#Figure 3- mutational signatures
+
+
+#Figure 4: Differential expression testing
+
+#Figure 5: de novo genes and transposable elements
+
+#Figure 6: dN/dS
+
+
+
+
+
+
+
+
+Supplemental table: DDR gene enrichment
+```{r}
+for (i in na.omit(unique(testis.cca$new.ident))){
+tmp2<-FindAllMarkers(subset(testis.cca, new.ident == i), only.pos = T, assay = "RNA")
+tmp2$celltype<-i
+tmp<-rbind(tmp, tmp2)
+}
+tmp<-subset(tmp, gene %in% DDR)
+write.csv(subset(tmp, p_val_adj<.05),"DDR.csv")
+data.frame()
+for (i in 2:nrow(data3)){
+  if ((as.numeric(data3[i,]$pos) - as.numeric(ans) ) < 10) {
+    ans<-min(data3[i,]$pos, ans)
+    tmp<-rbind(tmp, data.frame(data3[i,], cluster = paste(data3[i,]$chr,ans, sep="_"))) 
+    }
+    else{ #how to break?
+      ans<-data3[i,]$pos
+      tmp<-rbind(tmp, print(data.frame(data3[i,], cluster = "none")))
+    }
+    }
+ 
+```
+
+
+
+
