@@ -15,7 +15,8 @@ library(ggpubr)
 library(EnhancedVolcano)
 library(cowplot)
 library(rstatix)
-
+library(ggrepel)
+library(ggplot2)
 ```
 
 
@@ -862,8 +863,8 @@ names(tmp)<-c("Low","High")
 props<-cbind(props, tmp)
 
 
-props$new.ident<-factor(props$new.ident, levels = c("GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
-
+props$new.ident<-gsub(props$new.ident, pattern = "sperma", replacement="\nsperma")
+props$new.ident<-factor(props$new.ident, levels = c("GSC, Early \nspermatogonia", "Late \nspermatogonia", "Early \nspermatocytes", "Late \nspermatocytes", "Early \nspermatids", "Late \nspermatids"))
 
 tmp<-data.frame()
 for (i in c(1,3,5,7,9,11)){
@@ -884,7 +885,7 @@ props$age<-factor(props$age, levels = c("Young","Old"))
 ggplot(props, aes( x = new.ident, y = prop))+geom_bar(position = "dodge",stat = "identity", aes(fill  = age, col = age))+
   theme_classic()+theme(axis.text=element_text(size=10) )+
   geom_errorbar(width=0.3, position= position_dodge(width=0.9),col= "black",size=0.5,aes(ymin=Low, ymax=High, group=age))+
-  ylab("Proportion cells with mutations")+xlab("")+theme(axis.text =element_text(size=10), axis.title=element_text(size=10))+
+  ylab("Proportion cells with mutations")+xlab("")+theme(text=element_text(size=15),axis.text =element_text(size=15), axis.title=element_text(size=15))+
   geom_text(data = tmp,col="black",y=Inf, vjust = 1.5,aes(label = formatC(p, digits  = 2, format = "e")))+labs(fill = "Fly age", col = "Fly age")+scale_fill_manual(values=c("royalblue","darkorchid4"))+scale_color_manual(values=c("royalblue","darkorchid4"))
 
 
@@ -895,17 +896,744 @@ ggsave("210830_Figure2_mutload.pdf", width= 11.5, height=5)
 
 ```
 
-#Figure 3- mutational signatures
+#Figure 3a- mutational signatures
+
+```{r}
+type<-c("T>G", "T>C", "T>A", 
+        "C>A", "C>G","C>T")
+
+
+old<-c(230,349,579,
+      356,134,483)#double checked
+young<-c(206,282,267,201,114,274)#double checked
+
+
+
+#add up equivalent signatures:
+
+tmp<-data.frame()
+for (i in old ){
+  print(i)
+  tmp<-rbind(tmp, data.frame(low=prop.test(i, sum(old))$conf.int[1],Proportion=prop.test(i, sum(old))$estimate,
+                             high =prop.test(i, sum(old))$conf.int[2],
+                             p= prop.test(i, sum(old))$p.value))
+}
+tmp$age<-"Old"
+
+
+
+tmp2<-data.frame()
+for (i in young ){
+  print(i)
+  tmp2<-rbind(tmp2, data.frame(low=prop.test(i, sum(young))$conf.int[1],Proportion=prop.test(i, sum(young))$estimate,
+                               high =prop.test(i, sum(young))$conf.int[2],
+                               p= prop.test(i, sum(young))$p.value))
+}
+
+tmp2$age<-"Young"
+
+tmp<-rbind(tmp, tmp2)
+tmp$age <- c("Old","Old","Old","Old",
+             "Old","Old",
+             "Young","Young","Young",
+             "Young","Young","Young")
+tmp$type<-type
+
+
+#compare each set of proportions
+tmp3<-data.frame()
+for (i in 1:length(old)){
+  tmp3<-rbind(tmp3, (prop.test(c(old[i],young[i]),c(sum(old),sum(young)))$p.value))
+}
+
+
+
+#now adjust all those p values
+
+tmp3[,1]<-p.adjust(tmp3[,1])
+names(tmp3)<-"p.value"
+tmp3$type<-c("T>G", "T>C", "T>A", 
+             "C>A", "C>G","C>T")
+tmp$type<-factor(tmp$type, levels = c("T>G", "T>C", "T>A", 
+                                            "C>A", "C>G","C>T"))
+
+tmp<-plyr::join(tmp, tmp3)
+tmp$p.value<-c(formatC(tmp3$p.value,digits=2, format = "e" ),"","","","","","")
+tmp$age<-factor(tmp$age, levels = c("Young","Old"))
+p1<-ggplot(tmp, aes(y=Proportion, x=type, group= age))+
+  geom_bar(position = "dodge",stat = "identity",
+           aes(fill  = age))+theme_classic()+ylab("Proportion of mutations")+xlab("Mutation type")+labs(fill="Fly age")+
+  geom_errorbar(aes(ymin=low, ymax=high, group=age),
+                width=0.3, size=0.5, position = position_dodge(0.9))+geom_text(aes(label= p.value),y=Inf, vjust = 1)+theme(axis.text=element_text(size=10))
+p1+scale_fill_manual(values=c("royalblue","darkorchid4"))
+
+ggsave("210804_signatures.pdf", width=6.5, height = 4)
+```
+#figure 3b: scaled expression
+```{r}
+
+
+
+DDR <-(scan("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc data/181217_Dmel_li_denovo/DDR2.txt", what="", sep="\n" ))
+testis.cca<-ScaleData(testis.cca, assay  ="RNA", split.by = "rep")
+testis.cca@assays[["RNA"]]@scale.data[1:5,1:5]
+
+
+median_IQR <- function(x) {
+  data.frame(y = median(x), # Median
+             ymin = quantile(x)[2], # 1st quartile
+             ymax = quantile(x)[4])  # 3rd quartile
+}
+
+testis.cca@meta.data<- testis.cca@meta.data %>% mutate(age = ifelse(rep == "Old1" | rep == "Old2", "Old",
+                                                                                 ifelse(rep == "Rep1" | rep == "Rep2", "Young", NA)))
+
+
+tmp<-data.frame()
+for ( i in c("Old", "Young")){
+  for (j in unique(testis.cca$new.ident)) {
+  tmp2<-subset(testis.cca, age == i & new.ident == j )@assays$RNA@scale.data
+  tmp3<-data.frame(gene = rownames(tmp2), exp = rowMeans(tmp2), age = i, celltype = j)
+  tmp<-rbind(tmp, tmp3)
+  }
+}
+
+tmp$celltype<-factor(x = tmp$celltype, levels=c("Hub cells", "Cyst cells", "Epithelial cells", "GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
+tmp<-subset(tmp, !celltype %in% c("Hub cells", "Epithelial cells", "Cyst cells"))
+tmp$DDR<-ifelse(tmp$gene %in%  DDR, "DDR", "Not DDR")
+ggplot(tmp, aes(x= celltype, y = exp, fill = DDR)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+
+  facet_wrap(~age, nrow = 2)+theme(axis.text=element_text(size=10))
+
+
+
+#add p values
+library(rstatix)
+stat.test <- tmp %>%
+  group_by(celltype,DDR) %>%
+  wilcox_test(exp ~ age) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance() %>% add_y_position(fun ="max")
+stat.test$y.position[]<-1
+stat.test$p.adj<-formatC(stat.test$p.adj, digits = 2, format = "e")
+tmp$age<-factor(tmp$age, levels=c("Young","Old"))
+#best one
+ggplot(tmp, aes(x= DDR, y = exp)) + ylim(-1,1)+
+  theme_classic()+geom_violin(scale = "width",aes(fill = age))+labs(fill = "Fly age", y = "Scaled expression",x= "Gene type")+
+  facet_wrap(~celltype, nrow = 1)+theme(axis.text=element_text(size=10))+stat_summary(aes( x=DDR, y=exp, fill = age),
+                                                  fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5 )+geom_text(aes(x, y, label=lab),
+                                                                                                                                               data=data.frame(x = rep(c("DDR","Not DDR"),6), y=Inf, celltype = stat.test$celltype, lab=stat.test$p.adj,
+                                                                                                                                                               yy=letters[1:3]), vjust=1)+scale_fill_manual(values=c("royalblue","darkorchid4"))
+
+
+
+
+
+
+
+ggsave("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc_data/210830_DDR_scaled_expression.pdf", width=11.5, height=4)
+```
+
+
 
 
 #Figure 4: Differential expression testing
+```{r}
+
+options(ggrepel.max.overlaps=Inf)
+gsc <-subset(testis.cca, new.ident == "GSC, Early spermatogonia")
+Idents(gsc) <- "age"
+late.spermatogonia <-subset(testis.cca, subset = new.ident == "Late spermatogonia")
+Idents(late.spermatogonia) <- "age"
+early.spermatocytes <-subset(testis.cca, subset = new.ident == "Early spermatocytes")
+Idents(early.spermatocytes)<-"age"
+late.spermatocytes <-subset(testis.cca, subset = new.ident == "Late spermatocytes")
+Idents(late.spermatocytes)<-"age"
+early.spermatids <-subset(testis.cca, subset = new.ident == "Early spermatids")
+Idents(early.spermatids)<-"age"
+late.spermatids<-subset(testis.cca, subset = new.ident == "Late spermatids")
+Idents(late.spermatids)<-"age"
+
+gsc.age.markers<-FindMarkers(gsc, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+gsc.age.markers$gene <-rownames(gsc.age.markers)
+genes.label<-subset(gsc.age.markers, p_val_adj <.05  & gene %in% DDR )$gene
+keyvals <- ifelse(
+  gsc.age.markers$avg_log2FC < 0 & gsc.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(gsc.age.markers$avg_log2FC > 0 & gsc.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+
+p1<-EnhancedVolcano(gsc.age.markers,labSize = 3, title = "GSC, Early spermatogonia", drawConnectors = T,
+                    lab = gsc.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+
+
+p1
+
+late.spermatogonia.age.markers<-FindMarkers(late.spermatogonia, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+late.spermatogonia.age.markers$gene <-rownames(late.spermatogonia.age.markers)
+genes.label<-subset(late.spermatogonia.age.markers, p_val_adj <.05  & gene %in% DDR )$gene
+keyvals <- ifelse(
+  late.spermatogonia.age.markers$avg_log2FC < 0 & late.spermatogonia.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(late.spermatogonia.age.markers$avg_log2FC > 0 & late.spermatogonia.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+p2<-EnhancedVolcano(late.spermatogonia.age.markers,labSize = 3, title = "Late spermatogonia", drawConnectors = T,
+                    lab = late.spermatogonia.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                    y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+
+
+#p3<-plot_grid(p1, p2)
+#p3
+
+
+
+#do other cell types, at least for supplement
+
+
+
+
+early.spermatocytes <-subset(testis.cca, subset = new.ident == "Early spermatocytes")
+Idents(early.spermatocytes) <- "age"
+
+early.spermatocytes.age.markers<-FindMarkers(early.spermatocytes, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+early.spermatocytes.age.markers$gene <-rownames(early.spermatocytes.age.markers)
+genes.label<-subset(early.spermatocytes.age.markers, p_val_adj <.05 & abs(avg_log2FC) >1 & gene %in% DDR )$gene
+genes.label<-subset(late.spermatogonia.age.markers, p_val_adj <.05  & gene %in% DDR )$gene
+keyvals <- ifelse(
+  early.spermatocytes.age.markers$avg_log2FC < 0 & early.spermatocytes.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(early.spermatocytes.age.markers$avg_log2FC > 0 & early.spermatocytes.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+
+p3<-EnhancedVolcano(early.spermatocytes.age.markers,labSize = 3, title = "Early spermatocytes", drawConnectors = T,
+                    lab = early.spermatocytes.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                    y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+p3
+
+
+late.spermatocytes <-subset(testis.cca, subset = new.ident == "Late spermatocytes")
+Idents(late.spermatocytes) <- "age"
+
+late.spermatocytes.age.markers<-FindMarkers(late.spermatocytes, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+late.spermatocytes.age.markers$gene <-rownames(late.spermatocytes.age.markers)
+
+genes.label<-subset(late.spermatocytes.age.markers, p_val_adj <.05 & abs(avg_log2FC) >1 & gene %in% DDR )$gene
+keyvals <- ifelse(
+  late.spermatocytes.age.markers$avg_log2FC < 0 & late.spermatocytes.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(late.spermatocytes.age.markers$avg_log2FC > 0 & late.spermatocytes.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+
+p4<-EnhancedVolcano(late.spermatocytes.age.markers,labSize = 3, title = "Late spermatocytes", drawConnectors = T,
+                    lab = late.spermatocytes.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                    y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+p4
+
+
+
+early.spermatids <-subset(testis.cca, subset = new.ident == "Early spermatids")
+Idents(early.spermatids) <- "age"
+
+early.spermatids.age.markers<-FindMarkers(early.spermatids, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+early.spermatids.age.markers$gene <-rownames(early.spermatids.age.markers)
+
+genes.label<-subset(early.spermatids.age.markers, p_val_adj <.05 & abs(avg_log2FC) >1 & gene %in% DDR )$gene
+keyvals <- ifelse(
+  early.spermatids.age.markers$avg_log2FC < 0 & early.spermatids.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(early.spermatids.age.markers$avg_log2FC > 0 & early.spermatids.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+
+p5<-EnhancedVolcano(early.spermatids.age.markers,labSize = 3, title = "Early spermatids", drawConnectors = T,
+                    lab = early.spermatids.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                    y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+p5
+
+
+late.spermatids <-subset(testis.cca, subset = new.ident == "Late spermatids")
+Idents(late.spermatids) <- "age"
+
+late.spermatids.age.markers<-FindMarkers(late.spermatids, ident.1 = "Young", ident.2 = "Old", assay = "RNA")
+late.spermatids.age.markers$gene <-rownames(late.spermatids.age.markers)
+
+genes.label<-subset(late.spermatids.age.markers, p_val_adj <.05 & abs(avg_log2FC) >1 & gene %in% DDR )$gene
+keyvals <- ifelse(
+  late.spermatids.age.markers$avg_log2FC < 0 & late.spermatids.age.markers$p_val_adj <.05, 'darkorchid4',
+  ifelse(late.spermatids.age.markers$avg_log2FC > 0 & late.spermatids.age.markers$p_val_adj<.05, 'royalblue',
+         'grey'))
+keyvals[is.na(keyvals)] <- 'grey'
+names(keyvals)[keyvals == 'royalblue'] <- 'Young enriched'
+names(keyvals)[keyvals == 'grey'] <- 'ns'
+names(keyvals)[keyvals == 'darkorchid4'] <- 'Old enriched'
+
+p6<-EnhancedVolcano(late.spermatids.age.markers,labSize = 3, title = "Late spermatids", drawConnectors = T,
+                    lab = late.spermatids.age.markers$gene, selectLab= genes.label,colConnectors = "red",endsConnectors = "last",
+                    x = 'avg_log2FC', pCutoff = 0.05, FCcutoff = 0,colCustom = keyvals,boxedLabels = F,subtitle  = NULL,colAlpha = 0.4,
+                      y = 'p_val_adj', caption = NULL)+xlim(-2.5,2.5)
+
+p6
+
+
+
+p7<-plot_grid(p1,p2,p3,p4,p5,p6, nrow = 3, labels = c("A","B","C","D","E","F","G"), label_size = 20)
+ggsave(plot = p7,"~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc_data/210830_volcano_all_DDR.pdf", width=20, height=25)
+```
 
 #Figure 5: de novo genes and transposable elements
+```{r}
+Old1<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/210728_Old1_TE_denovo_run/")
+Old1 <- CreateSeuratObject(Old1, min.cells = 3, min.features =200)
+Old1$rep<-"Old1"
+Old1<-NormalizeData(Old1)
+Old1<-FindVariableFeatures(Old1)
+Old1<-ScaleData(Old1)
+Old1<-SCTransform(Old1)
+Old1<-RunPCA(Old1)
+
+
+Old2<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/210728_Old2_TE_denovo_run/")
+Old2 <- CreateSeuratObject(Old2, min.cells = 3,min.features =200)
+Old2$rep<-"Old2"
+Old2<-NormalizeData(Old2)
+Old2<-ScaleData(Old2)
+Old2<-FindVariableFeatures(Old2)
+Old2<-SCTransform(Old2)
+Old2<-RunPCA(Old2)
+
+Rep1<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/210728_Young1_TE_denovo_run/")
+Rep1 <- CreateSeuratObject(Rep1,min.cells = 3, min.features =200)
+Rep1$rep<-"Rep1"
+Rep1<-NormalizeData(Rep1)
+Rep1<-FindVariableFeatures(Rep1)
+Rep1<-ScaleData(Rep1)
+Rep1<-SCTransform(Rep1)
+Rep1<-RunPCA(Rep1)
+
+
+Rep2<-Read10X("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/210728_Young2_TE_denovo_run/")
+Rep2 <- CreateSeuratObject(Rep2, min.cells = 3,min.features =200)
+Rep2$rep<-"Rep2"
+Rep2<-NormalizeData(Rep2)
+Rep2<-ScaleData(Rep2)
+Rep2<-FindVariableFeatures(Rep2)
+Rep2<-SCTransform(Rep2)
+Rep2<-RunPCA(Rep2)
+
+
+features <- SelectIntegrationFeatures(object.list = list(Old1,Old2,Rep1,Rep2))
+anchors <- FindIntegrationAnchors(object.list = list(Old1,Old2,Rep1,Rep2), anchor.features = features)
+
+testis_te_denovo_combined<-IntegrateData(anchorset=anchors)
+
+testis_te_denovo_combined$barcode2<-rownames(testis_te_denovo_combined@meta.data)
+
+
+#testis.cca<-readRDS("~/Dropbox (Dropbox @RU)/Migrated From Box//R517_3reps/210718_4Reps_Old_Young_CCA_SCT.RDS")
+testis.cca@meta.data$barcode2<-stringr::str_split(rownames(testis.cca@meta.data), pattern="-", simplify=T)[,1]
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old2_Old2_",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old2_",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="Old1_",replacement= "")
+
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_2",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_3",replacement= "")
+testis.cca@meta.data$barcode2<-gsub(x= testis.cca@meta.data$barcode2, pattern ="_1",replacement= "")
+
+testis_te_denovo_combined@meta.data$barcode2<-gsub(x= testis_te_denovo_combined@meta.data$barcode2, pattern ="Old2_",replacement= "")
+testis_te_denovo_combined$barcode2<-gsub(x= testis_te_denovo_combined$barcode2, pattern ="_2",replacement= "")
+testis_te_denovo_combined$barcode2<-gsub(x= testis_te_denovo_combined$barcode2, pattern ="_3",replacement= "")
+testis_te_denovo_combined$barcode2<-gsub(x= testis_te_denovo_combined$barcode2, pattern ="_1",replacement= "")
+testis_te_denovo_combined$barcode2<-gsub(x= testis_te_denovo_combined$barcode2, pattern ="-1",replacement= "")
+testis_te_denovo_combined$barcode2<-gsub(x= testis_te_denovo_combined$barcode2, pattern ="_4",replacement= "")
+
+
+
+
+metadata2<-plyr::join(testis_te_denovo_combined@meta.data, testis.cca@meta.data, by = c("barcode2","rep"))
+
+testis_te_denovo_combined$new.ident<-metadata2$new.ident
+testis_te_denovo_combined$age<-metadata2$age
+
+#saveRDS(testis_te_denovo_combined, "~/Box Sync/Other data/210230_testis_4reps_young_old_te_denovo.RDS")
+
+testis_te_denovo_combined@meta.data[,c("new.ident","rep")] %>%table()
+
+Idents(testis_te_denovo_combined)<-"new.ident"
+markers<-FindAllMarkers(testis_te_denovo_combined, only.pos = T)
+
+
+
+
+
+seg<-(scan("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc data/181217_Dmel_li_denovo/181221_li_segdenovo_DE_pseudotime.names.txt", what="", sep="\n"))
+fixed<-(scan("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc data/181217_Dmel_li_denovo/181221_li_fixeddenovo_DE_pseudotime.names.txt", what="", sep="\n"))
+seg <-unique(seg)
+fixed <-unique(fixed)
+denovo <- append(seg, fixed)
+denovo <-unique(denovo)
+denovo<-gsub(x=denovo, pattern ="_", replacement = "-" )
+seg<-gsub(x=seg, pattern ="_", replacement = "-" )
+fixed<-gsub(x=fixed, pattern ="_", replacement = "-" )
+
+notdenovo<- testis_te_denovo_combined@assays[["RNA"]]@counts@Dimnames[[1]][!testis_te_denovo_combined@assays[["RNA"]]@counts@Dimnames[[1]] %in% denovo]
+
+avgexp<-AverageExpression(testis_te_denovo_combined)
+avgexp<-avgexp$RNA
+
+
+
+testis_te_denovo_combined<-ScaleData(testis_te_denovo_combined, assay  ="RNA", split.by = "rep")
+testis_te_denovo_combined<-SCTransform(testis_te_denovo_combined)
+
+tmp<-data.frame()
+for ( i in c("Old", "Young")){
+  for (j in na.omit(unique(testis_te_denovo_combined$new.ident))) {
+    tmp2<-subset(testis_te_denovo_combined, age == i & new.ident == j )@assays$RNA@scale.data
+    tmp3<-data.frame(gene = rownames(tmp2), exp = rowMeans(tmp2), age = i, celltype = j)
+    tmp<-rbind(tmp, tmp3)
+  }
+}
+
+tmp$celltype<-factor(x = tmp$celltype, levels=c("Hub cells", "Cyst cells", "Epithelial cells", "GSC, Early spermatogonia", "Late spermatogonia", "Early spermatocytes", "Late spermatocytes", "Early spermatids", "Late spermatids"))
+tmp<-subset(tmp, !celltype %in% c("Hub cells", "Epithelial cells", "Cyst cells"))
+tmp$denovo<-ifelse(tmp$gene %in%  denovo, "de novo", "Not de novo")
+ggplot(tmp, aes(x= celltype, y = exp, fill = denovo)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+
+  facet_wrap(~age, nrow = 2)+theme(axis.text=element_text(size=10))
+
+
+#best one
+ggplot(tmp, aes(x= denovo, y = exp, fill = age)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+
+  facet_wrap(~celltype, nrow = 1)+theme(axis.text=element_text(size=10))+stat_compare_means(method = "wilcox",p.adjust.methods = "bonferroni", label = "p.signif")
+
+
+
+#seg and fixed
+
+
+tmp$denovotype<-ifelse(tmp$gene %in%  seg, "seg", ifelse (tmp$gene %in% fixed, "fixed", "not de novo") )
+ggplot(tmp, aes(x= denovotype, y = exp, fill = age)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+
+  facet_wrap(~celltype, nrow = 1)+theme(axis.text=element_text(size=10))+stat_compare_means(method = "wilcox",p.adjust.methods = "bonferroni", label = "p.signif")
+
+ggplot(tmp, aes(x= denovotype, y = exp, fill = age)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+ylab("scaled expression")+
+  facet_wrap(~celltype, nrow = 1)+theme(axis.text=element_text(size=10))+stat_compare_means(method = "wilcox",p.adjust.methods = "bonferroni", label = "p.signif")
+
+
+#now do TEs
+
+TE<-read.delim("~/Dropbox (Dropbox @RU)/Migrated From Box/Other data/TE_list.txt", header = F)
+TE<-TE$V1
+
+tmp$TE<-ifelse(tmp$gene %in%  TE, "TE", "not TE")
+ggplot(tmp, aes(x= TE, y = exp, fill = age)) + ylim(-1,1)+
+  theme_classic()+geom_boxplot(outlier.shape = NA)+ylab("scaled expression")+
+  facet_wrap(~celltype, nrow = 1)+theme(axis.text=element_text(size=10))+stat_compare_means(method = "wilcox",p.adjust.methods = "bonferroni", label = "p.signif")
+
+#TE markers, de novo markers
+
+Idents(testis_te_denovo_combined)<-"age"
+markers<-FindAllMarkers(testis_te_denovo_combined, only.pos = T, assay  = "RNA")
+
+
+denovomarkers<-subset(data.frame(markers), gene %in% denovo)
+TEmarkers<-subset(data.frame(markers), gene %in% TE)
+
+#might split be cell type and age
+
+
+Idents(testis_te_denovo_combined)<-c("age")
+tmp<-data.frame()
+for (i in na.omit(unique(testis_te_denovo_combined$new.ident))){
+  tmp2<-FindAllMarkers(subset(testis_te_denovo_combined, new.ident == i), only.pos = T, assay = "RNA")
+  tmp2$celltype<-i
+  tmp<-rbind(tmp, tmp2)
+}
+
+denovomarkers<-subset(data.frame(tmp), gene %in% denovo)
+segmarkers<-subset(denovomarkers, gene %in% seg)
+segmarkers$type<-"seg"
+fixedmarkers<-subset(denovomarkers, gene %in% fixed)
+fixedmarkers$type<-"fixed"
+denovomarkers<-rbind(segmarkers, fixedmarkers)
+TEmarkers<-subset(data.frame(tmp), gene %in% TE)
+#supplemental tables)
+#write.csv(denovomarkers,"denovo.csv")
+#write.csv(TEmarkers,"TE.csv")
+
+#make plot with number of de novo, TE enriched in each cell type, young or old
+
+
+tmp2<-unique(TEmarkers[,c("cluster","gene")])$cluster %>%table() %>% data.frame()
+names(tmp2)<-c("cluster","Freq")
+tmp2$type<-"Transposable Element"
+tmp3<-denovomarkers %>%group_by(cluster, type) %>%tally()
+
+tmp3<-unique(denovomarkers[,c("cluster","type","gene")])[,c("cluster","type")] %>%table() %>%data.frame()
+
+
+tmp3<-rbind(tmp2, tmp3)
+
+
+tmp3$type<-gsub(x=tmp3$type,  pattern ="seg", "Segregating de novo")
+tmp3$type<-gsub(x=tmp3$type,pattern ="fixed", "Fixed de novo")
+tmp3$cluster<-factor(tmp3$cluster, levels = c("Young","Old"))
+
+ggplot(tmp3, aes(x=cluster,fill= cluster, y=Freq))+geom_bar(stat= "identity")+facet_wrap(~type)+theme_classic()+scale_fill_manual(values=c("royalblue","darkorchid4"))+
+  theme(legend.position = "none")+ylab("Number of elements enriched")+scale_y_continuous(breaks=c(0,2,4,6,8,10))
+ggsave("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc_data/210901_figure5_seg_fixed_TE.pdf", width=7, height=3)
+
+
+
+
+```
 
 #Figure 6: dN/dS
 
+```{r}
+dnds<-read.delim("~/Downloads/melsubgroup_analysis_results_flydivas_v1.2")
+
+dnds<-dnds[,c("symbol", "dN", "dS")]
+colnames(dnds)<-c("gene","dN", "dS")
+
+Idents(testis.cca)<-"age"
+#get enriched  marker genes between cell types, ages
+Agemarkers<-FindAllMarkers(testis.cca, only.pos = T )
+Agemarkers<-plyr::join(Agemarkers, dnds)
+Agemarkers<-na.omit(Agemarkers)
+Agemarkers$dnds<-Agemarkers$dN/Agemarkers$dS
+ggplot(Agemarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.2)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("All cells")
+
+gscmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="GSC, Early spermatogonia"),only.pos = T, assay = "RNA")
+#write.csv(gscmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_GSC_EarlySpermatogonia_markers.csv")
+
+latespgmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatogonia"),only.pos = T, assay = "RNA")
+#write.csv(latespgmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_LateSpermatogonia_markers.csv")
+
+earlyspermatocytemarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Early spermatocytes"),only.pos = T, assay = "RNA")
+#write.csv(earlyspermatocytemarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Earlyspermatocyte_markers.csv")
+
+latespermatocytemarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatocytes"),only.pos = T, assay = "RNA")
+#write.csv(latespermatocytemarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Latespermatocyte_markers.csv")
+
+earlyspermatidmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Early spermatids"),only.pos = T, assay = "RNA")
+#write.csv(earlyspermatidmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Earlyspermatid_markers.csv")
+
+latespermatidmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatids"),only.pos = T, assay = "RNA")
+#write.csv(latespermatidmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Latespermatid_markers.csv")
 
 
+
+gscmarkers<-plyr::join(gscmarkers, dnds)
+gscmarkers<-na.omit(gscmarkers)
+gscmarkers$dnds<-gscmarkers$dN/gscmarkers$dS
+ggplot(gscmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("GSC, early spermatogonia")
+
+latespgmarkers<-plyr::join(latespgmarkers, dnds)
+latespgmarkers<-na.omit(latespgmarkers)
+latespgmarkers$dnds<-latespgmarkers$dN/latespgmarkers$dS
+ggplot(latespgmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")
+
+
+
+latespermatidmarkers<-plyr::join(latespermatidmarkers, dnds)
+latespermatidmarkers<-na.omit(latespermatidmarkers)
+latespermatidmarkers$dnds<-latespermatidmarkers$dN/latespermatidmarkers$dS
+ggplot(latespermatidmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("Late spermatids")
+
+
+
+gscmarkers$Celltype<-"GSC, Early spermatogonia"
+latespermatidmarkers$Celltype<-"Late spermatids"
+youngmarkers<-rbind(subset(gscmarkers, cluster =="Young"), subset(latespermatidmarkers, cluster == "Young"))
+oldmarkers<-rbind(subset(gscmarkers, cluster =="Old"), subset(latespermatidmarkers, cluster == "Old"))
+
+combinedmarkers<-rbind(oldmarkers, youngmarkers)
+
+ggplot(combinedmarkers, aes(x=Celltype, y = dnds, fill = Celltype))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+facet_wrap(~cluster)+
+  stat_summary(aes( x=Celltype, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")
+
+
+
+
+latespermatocytemarkers<-plyr::join(latespermatocytemarkers, dnds)
+latespermatocytemarkers<-na.omit(latespermatocytemarkers)
+latespermatocytemarkers$dnds<-latespermatocytemarkers$dN/latespermatocytemarkers$dS
+ggplot(latespermatocytemarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("Late spermatocytes")
+
+Idents(testis.cca)<-"new.ident"
+earlymarkers1<-FindMarkers(subset(testis.cca, age == "Young"), ident.1 = "GSC, Early spermatogonia",ident.2 = "Late spermatids", only.pos = T)
+latemarkers1<-FindMarkers(subset(testis.cca, age == "Young"), ident.2 = "GSC, Early spermatogonia",ident.1 = "Late spermatids", only.pos = T)
+earlymarkers1$celltype<-"GSC, Early spermatogonia"
+latemarkers1$celltype<-"Late spermatids"
+earlymarkers1$age<-"Young"
+latemarkers1$age<-"Young"
+earlymarkers2<-FindMarkers(subset(testis.cca, age == "Old"), ident.1 = "GSC, Early spermatogonia",ident.2 = "Late spermatids", only.pos = T)
+latemarkers2<-FindMarkers(subset(testis.cca, age == "Old"), ident.2 = "GSC, Early spermatogonia",ident.1 = "Late spermatids", only.pos = T)
+earlymarkers2$celltype<-"GSC, Early spermatogonia"
+latemarkers2$celltype<-"Late spermatids"
+earlymarkers2$age<-"Old"
+latemarkers2$age<-"Old"
+earlymarkers1$gene<-rownames(earlymarkers1)
+earlymarkers2$gene<-rownames(earlymarkers2)
+latemarkers1$gene<-rownames(latemarkers1)
+latemarkers2$gene<-rownames(latemarkers2)
+
+
+
+earlylatemarkers<-do.call("rbind",list(earlymarkers1, latemarkers1, earlymarkers2, latemarkers2) )
+earlylatemarkers$gene<-rownames(earlylatemarkers)
+earlylatemarkers<-plyr::join(earlylatemarkers,dnds)
+earlylatemarkers<-na.omit(earlylatemarkers)
+earlylatemarkers$dnds<-earlylatemarkers$dN/earlylatemarkers$dS
+earlylatemarkers$age<-factor(earlylatemarkers$age, levels = c("Young","Old"))
+
+#get p values
+stat.test <- earlylatemarkers %>%
+  group_by(age) %>%
+  wilcox_test(dnds ~ celltype) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance() %>% add_y_position(fun ="max")
+
+#figure 6A
+p1<-ggplot(subset(earlylatemarkers,celltype %in% c("GSC, Early spermatogonia","Late spermatids")), aes(x=celltype, y = dnds, fill = age))+facet_wrap(~age)+geom_violin()+stat_compare_means(aes(x=celltype), label.x = 1.5, method = "wilcox")+theme_classic()+
+  stat_summary(aes( x=celltype, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("")+theme(axis.text=element_text(size = 10))+scale_fill_manual(values=c("royalblue","darkorchid4"))+ggtitle("Cell type-enriched genes")+theme(title=element_text(size=15),axis.text=element_text(size = 15), axis.title = element_text(size=15), strip.text = element_text(size=15), legend.position = "none")
+
+
+
+#get p values
+
+
+#not a huge early and late difference between 
+
+
+#recreate age-specific gene enrichment with mel subgroup flydivas datasets######
+
+
+Idents(testis.cca)<-"age"
+#get enriched  marker genes between cell types, ages
+Agemarkers<-FindAllMarkers(testis.cca, only.pos = T )
+#write.csv(Agemarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Agemarkers.csv")
+Idents(testis.cca)<-"age"
+
+gscmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="GSC, Early spermatogonia"),only.pos = T, assay = "RNA")
+#write.csv(gscmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_GSC_EarlySpermatogonia_markers.csv")
+
+latespgmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatogonia"),only.pos = T, assay = "RNA")
+#write.csv(latespgmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_LateSpermatogonia_markers.csv")
+
+earlyspermatocytemarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Early spermatocytes"),only.pos = T, assay = "RNA")
+#write.csv(earlyspermatocytemarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Earlyspermatocyte_markers.csv")
+
+latespermatocytemarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatocytes"),only.pos = T, assay = "RNA")
+#write.csv(latespermatocytemarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Latespermatocyte_markers.csv")
+
+earlyspermatidmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Early spermatids"),only.pos = T, assay = "RNA")
+#write.csv(earlyspermatidmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Earlyspermatid_markers.csv")
+
+latespermatidmarkers<-FindAllMarkers(subset(testis.cca, subset = new.ident =="Late spermatids"),only.pos = T, assay = "RNA")
+#write.csv(latespermatidmarkers, "~/Box Sync/Evan/Zhao lab notebook/Misc_data/210603_R517_Latespermatid_markers.csv")
+
+gscmarkers<-plyr::join(gscmarkers, dnds)
+gscmarkers<-na.omit(gscmarkers)
+gscmarkers$dnds<-gscmarkers$dN/gscmarkers$dS
+ggplot(gscmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("GSC, early spermatogonia")
+
+latespgmarkers<-plyr::join(latespgmarkers, dnds)
+latespgmarkers<-na.omit(latespgmarkers)
+latespgmarkers$dnds<-latespgmarkers$dN/latespgmarkers$dS
+ggplot(latespgmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")
+
+
+
+latespermatidmarkers<-plyr::join(latespermatidmarkers, dnds)
+latespermatidmarkers<-na.omit(latespermatidmarkers)
+latespermatidmarkers$dnds<-latespermatidmarkers$dN/latespermatidmarkers$dS
+ggplot(latespermatidmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(label.x = 1.5)+theme_classic()+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("Fly age")+scale_fill_manual(values=c("royalblue","grey"))+theme(axis.text=element_text(size = 10), legend.position = "none")+ggtitle("Late spermatids")
+
+
+
+gscmarkers$Celltype<-"GSC, Early spermatogonia"
+latespermatidmarkers$Celltype<-"Late spermatids"
+youngmarkers<-rbind(subset(gscmarkers, cluster =="Young"), subset(latespermatidmarkers, cluster == "Young"))
+oldmarkers<-rbind(subset(gscmarkers, cluster =="Old"), subset(latespermatidmarkers, cluster == "Old"))
+
+combinedmarkers<-rbind(oldmarkers, youngmarkers)
+
+ggplot(combinedmarkers, aes(x=Celltype, y = dnds, fill = cluster))+geom_violin()+stat_compare_means(aes(fill = Celltype),label.x = 1.5)+theme_classic()+facet_wrap(~cluster)+
+  stat_summary(aes( x=Celltype, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+scale_fill_manual(values=c("royalblue","darkorchid4"))+theme(axis.text=element_text(size = 15), axis.title = element_text(size=15), strip.text = element_text(size=15), legend.position = "none")
+
+stat.test2 <- combinedmarkers %>%
+  group_by(Celltype) %>%
+  wilcox_test(dnds ~ cluster) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance() %>% add_y_position(fun ="max")
+
+p2<-ggplot(combinedmarkers, aes(x=cluster, y = dnds, fill = cluster))+geom_violin()+theme_classic()+facet_wrap(~Celltype)+
+  stat_summary(aes( x=cluster, y=dnds),
+               fun.data="median_IQR", position=position_dodge(width=0.9), col="white", size=0.5
+  )+ylab("dN/dS")+xlab("")+scale_fill_manual(values=c("royalblue","darkorchid4"))+ggtitle("Age-enriched genes")+theme(title=element_text(size=15),axis.text=element_text(size = 15), axis.title = element_text(size=15), strip.text = element_text(size=15), legend.position = "none")
+
+
+
+
+#Figure 6
+plot_grid(p1, p2, nrow = 2, labels = c("A","B"), label_size = 15)
+ggsave("~/Dropbox (Dropbox @RU)/Evan/Zhao lab notebook/Misc_data/210902_Figure6.pdf", width=10, height=8)
+
+```
 
 
 
@@ -934,6 +1662,9 @@ for (i in 2:nrow(data3)){
  
 ```
 
+Supplemental figure: dN/dS for all cells
+```{r}
 
+```
 
 
