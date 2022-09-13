@@ -7,8 +7,8 @@ Seurat RDS for the alternate TE/de novo gene reference is located at https://www
 Raw sequence files for sc-RNA-seq and gDNA-seq will be released on SRA.
 
 220527_gDNA_align.bash shows the steps we used to align gDNA to the reference genome for SNP calling.
-220601_Cellranger.bash aligns the single cell data
-220614_read_annotation.bash gets the cell barcode information from mutated read
+220601_Cellranger.bash aligns the single cell data,
+220614_read_annotation.bash gets the cell barcode information from mutated read,
 220531_sc.R goes through the single cell analysis
 
 210830_Aging_paper_code.Rmd is an older version of the analysis.
