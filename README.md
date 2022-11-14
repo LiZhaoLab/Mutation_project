@@ -9,5 +9,5 @@ Raw sequence files for sc-RNA-seq and gDNA-seq are available on SRA with accessi
 220527_gDNA_align.bash shows the steps we used to align gDNA to the reference genome for SNP calling.
 220601_Cellranger.bash aligns the single cell data,
 220614_read_annotation.bash gets the cell barcode information from mutated read,
-220908_Witt_Old_Young_SC.rmd goes through the single cell analysis
+220908_Witt_Old_Young_SC.rmd is our code to produce figures.
 
