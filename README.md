@@ -2,7 +2,7 @@
 This repository supports our paper on the transcriptional and mutational consequences of aging in the male Drosophila germline.
 
 The seurat RDS for the main analysis is located at [https://www.dropbox.com/s/pf1x781c7poubrp/220607_6reps.RDS?dl=0](https://www.dropbox.com/scl/fi/ommrr3nf1aat54vxz7ak9/220607_6reps.RDS?rlkey=31iyq6zfudbzkkb6m6doq762n&st=4bdh2qzd&dl=0). Seurat RDS for the alternate TE/de novo gene reference is located at [https://www.dropbox.com/scl/fi/ommrr3nf1aat54vxz7ak9/220607_6reps.RDS?rlkey=31iyq6zfudbzkkb6m6doq762n&dl=0](https://www.dropbox.com/scl/fi/ommrr3nf1aat54vxz7ak9/220607_6reps.RDS?rlkey=31iyq6zfudbzkkb6m6doq762n&st=4bdh2qzd&dl=0).
-[update for expired links: If the links for RDS are not availble, please regenerate the RDS file from the raw reads, or please contact lzhao@rockefeller.edu for a copy. We also deleted a link for a file we generated on June 3, 2021, since the updated data published in 2023 was generated in 2022.]
+[update for expired links: If the links for RDS are not availble, please regenerate the RDS file from the raw reads, or please contact lzhao@rockefeller.edu for a copy. We  deleted an expired link for an early intermediate file we generated on June 3, 2021,  it is irrelevant to the publication as the updated data published in 2023 was generated in 2022.]
 
 Raw sequence files for sc-RNA-seq and gDNA-seq are available on SRA with accession number PRJNA777411.
 
